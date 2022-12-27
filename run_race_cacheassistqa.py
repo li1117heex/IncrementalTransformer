@@ -48,8 +48,7 @@ from transformers.utils import check_min_version
 
 import re
 
-from incremental_trf3_teach2_deformer_assist_race import IncrementalRobertaForMultipleChoice
-from incremental_trf3_teach2_deformer_assist_race import convert_ro_incr
+from cacheassistqa_encoder_race import CacheAssistQAForMultipleChoice,convert_ro_incr
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.17.0.dev0")
@@ -356,7 +355,7 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    model = IncrementalRobertaForMultipleChoice.from_pretrained(
+    model = CacheAssistQAForMultipleChoice.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,

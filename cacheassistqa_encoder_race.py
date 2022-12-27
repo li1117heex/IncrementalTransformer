@@ -15,10 +15,10 @@ from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, CosineEmbeddingLoss
 from transformers import AutoConfig
 
-from incremental_attn_p2q import IncrementalRobertaSelfAttentionCross
+from cacheassist_attn import CacheAssistAttention
 import copy
 
-class IncrementalRobertaLayer(RobertaLayer):
+class CacheAssistQALayer(RobertaLayer):
     def __init__(self, config):
         super().__init__(config)
 
@@ -91,11 +91,11 @@ class IncrementalRobertaLayer(RobertaLayer):
 
         return outputs
 
-class IncrementalRobertaEncoder(RobertaEncoder):
+class CacheAssistQAEncoder(RobertaEncoder):
     def __init__(self, config):
         super().__init__(config)
         # self.config = config
-        self.layer = nn.ModuleList([IncrementalRobertaLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList([CacheAssistQALayer(config) for _ in range(config.num_hidden_layers)])
         # self.gradient_checkpointing = False
 
     def forward(
@@ -188,7 +188,7 @@ class IncrementalRobertaEncoder(RobertaEncoder):
             cross_attentions=all_cross_attentions,
         )
 
-class IncrementalRobertaModel(RobertaModel):
+class CacheAssistQAModel(RobertaModel):
     """
 
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
@@ -224,10 +224,10 @@ class IncrementalRobertaModel(RobertaModel):
         config3 = copy.deepcopy(config)
         config3.num_hidden_layers = config.encoder3_layers
         self.encoder2 = RobertaEncoder(config2)
-        self.encoder2assist = IncrementalRobertaEncoder(config2assist)
+        self.encoder2assist = CacheAssistQAEncoder(config2assist)
         self.encoder3 = RobertaEncoder(config3)
         for i, layer in enumerate(self.encoder2assist.layer):
-            layer.attention.self = IncrementalRobertaSelfAttentionCross(config)
+            layer.attention.self = CacheAssistAttention(config)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -535,13 +535,13 @@ class IncrementalRobertaModel(RobertaModel):
             cross_attentions=sequence_output.cross_attentions,
         )
 
-class IncrementalRobertaForMultipleChoice(RobertaForMultipleChoice):
+class CacheAssistQAForMultipleChoice(RobertaForMultipleChoice):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def __init__(self, config):
         super().__init__(config)
 
-        self.roberta = IncrementalRobertaModel(config, add_pooling_layer=True)
+        self.roberta = CacheAssistQAModel(config, add_pooling_layer=True)
         # self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # self.classifier = nn.Linear(config.hidden_size, 1)
 

@@ -4,10 +4,11 @@ from transformers.models.roberta.modeling_roberta import (
     RobertaModel,
     RobertaEncoder,
     RobertaLayer,
-    RobertaForQuestionAnswering
+    RobertaForSequenceClassification,
+    RobertaPooler
 )
 
-from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, QuestionAnsweringModelOutput, BaseModelOutputWithPastAndCrossAttentions
+from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions, SequenceClassifierOutput
 from transformers.modeling_utils import apply_chunking_to_forward
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, CosineEmbeddingLoss
@@ -16,7 +17,7 @@ from transformers import AutoConfig
 from cacheassist_attn import CacheAssistAttention
 import copy
 
-class IncrementalRobertaLayer(RobertaLayer):
+class CacheAssistQALayer(RobertaLayer):
     def __init__(self, config):
         super().__init__(config)
 
@@ -89,11 +90,11 @@ class IncrementalRobertaLayer(RobertaLayer):
 
         return outputs
 
-class IncrementalRobertaEncoder(RobertaEncoder):
+class CacheAssistQAEncoder(RobertaEncoder):
     def __init__(self, config):
         super().__init__(config)
         # self.config = config
-        self.layer = nn.ModuleList([IncrementalRobertaLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList([CacheAssistQALayer(config) for _ in range(config.num_hidden_layers)])
         # self.gradient_checkpointing = False
 
     def forward(
@@ -186,7 +187,7 @@ class IncrementalRobertaEncoder(RobertaEncoder):
             cross_attentions=all_cross_attentions,
         )
 
-class IncrementalRobertaModel(RobertaModel):
+class CacheAssistQAModel(RobertaModel):
     """
 
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
@@ -205,7 +206,7 @@ class IncrementalRobertaModel(RobertaModel):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta
-    def __init__(self, config):
+    def __init__(self, config, add_pooling_layer=False):
         super().__init__(config, add_pooling_layer=False)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         # self.config = config
@@ -213,7 +214,7 @@ class IncrementalRobertaModel(RobertaModel):
         # self.embeddings = RobertaEmbeddings(config)
         # self.encoder = RobertaEncoder(config)
         #
-        # self.pooler = RobertaPooler(config) if add_pooling_layer else None
+        self.pooler = RobertaPooler(config) if add_pooling_layer else None
 
         config2 = copy.deepcopy(config)
         config2.num_hidden_layers = config.encoder2_layers
@@ -222,10 +223,10 @@ class IncrementalRobertaModel(RobertaModel):
         config3 = copy.deepcopy(config)
         config3.num_hidden_layers = config.encoder3_layers
         self.encoder2 = RobertaEncoder(config2)
-        self.encoder2assist = IncrementalRobertaEncoder(config2assist)
+        self.encoder2assist = CacheAssistQAEncoder(config2assist)
         self.encoder3 = RobertaEncoder(config3)
         for i, layer in enumerate(self.encoder2assist.layer):
-            layer.attention.self = CacheAssistQAAttention(config)
+            layer.attention.self = CacheAssistAttention(config)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -366,7 +367,7 @@ class IncrementalRobertaModel(RobertaModel):
             `past_key_values`).
         """
         # boundry,question_input_ids,question_attention_mask=self.bound(question_input_ids,question_attention_mask)
-        boundry=question_input_ids.shape[1]
+        boundry=question_input_ids.shape[-1]
         input_ids=torch.cat([question_input_ids,input_ids],dim=1)
 
         # attention_mask2 = torch.cat([question_attention_mask*2, attention_mask], dim=1)
@@ -533,15 +534,15 @@ class IncrementalRobertaModel(RobertaModel):
             cross_attentions=sequence_output.cross_attentions,
         )
 
-class IncrementalRobertaForQuestionAnswering(RobertaForQuestionAnswering):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+class CacheAssistQAForSequenceClassification(RobertaForSequenceClassification):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def __init__(self, config):
         super().__init__(config)
-        # self.num_labels = config.num_labels
-        #
-        self.roberta = IncrementalRobertaModel(config)
+
+        self.roberta = CacheAssistQAModel(config, add_pooling_layer=True)
+        # self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        # self.classifier = nn.Linear(config.hidden_size, 1)
 
         teacher_config = AutoConfig.from_pretrained(
             config.teacher_model_path,
@@ -549,7 +550,7 @@ class IncrementalRobertaForQuestionAnswering(RobertaForQuestionAnswering):
             revision='main',
             use_auth_token=False,
         )
-        self.teacher = RobertaForQuestionAnswering.from_pretrained(
+        self.teacher = RobertaForSequenceClassification.from_pretrained(
             config.teacher_model_path,
             from_tf=bool(".ckpt" in config.teacher_model_path),
             config=teacher_config,
@@ -558,18 +559,17 @@ class IncrementalRobertaForQuestionAnswering(RobertaForQuestionAnswering):
             use_auth_token=False,
         )
         # self.teacher.training=False
-        self.alpha=config.alpha
+        self.alpha = config.alpha
         self.temperature = config.temperature
-        # self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
 
         # Initialize weights and apply final processing
         # self.post_init()
 
-    # @add_start_docstrings_to_model_forward(ROBERTA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
+    # @add_start_docstrings_to_model_forward(ROBERTA_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
     # @add_code_sample_docstrings(
     #     processor_class=_TOKENIZER_FOR_DOC,
     #     checkpoint=_CHECKPOINT_FOR_DOC,
-    #     output_type=QuestionAnsweringModelOutput,
+    #     output_type=SequenceClassificationModelOutput,
     #     config_class=_CONFIG_FOR_DOC,
     # )
     def forward(
@@ -579,100 +579,89 @@ class IncrementalRobertaForQuestionAnswering(RobertaForQuestionAnswering):
         attention_mask=None,
         question_attention_mask=None,
         token_type_ids=None,
+        labels=None,
         position_ids=None,
         head_mask=None,
         inputs_embeds=None,
-        start_positions=None,
-        end_positions=None,
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
     ):
         r"""
-        start_positions (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-            Labels for position (index) of the start of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (`sequence_length`). Position outside of the sequence
-            are not taken into account for computing the loss.
-        end_positions (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-            Labels for position (index) of the end of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (`sequence_length`). Position outside of the sequence
-            are not taken into account for computing the loss.
+        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+            Labels for computing the multiple choice classification loss. Indices should be in `[0, ...,
+            num_choices-1]` where `num_choices` is the size of the second dimension of the input tensors. (See
+            `input_ids` above)
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.roberta(
             input_ids,
             question_input_ids=question_input_ids,
+            position_ids=position_ids,
+            token_type_ids=token_type_ids,
             attention_mask=attention_mask,
             question_attention_mask=question_attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-
         sequence_output = outputs[0]
+        logits = self.classifier(sequence_output)
 
-        logits = self.qa_outputs(sequence_output)
-        start_logits, end_logits = logits.split(1, dim=-1)
-        start_logits = start_logits.squeeze(-1).contiguous()
-        end_logits = end_logits.squeeze(-1).contiguous()
+        loss = None
+        if labels is not None:
+            if self.config.problem_type is None:
+                if self.num_labels == 1:
+                    self.config.problem_type = "regression"
+                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                    self.config.problem_type = "single_label_classification"
+                else:
+                    self.config.problem_type = "multi_label_classification"
 
-        total_loss = None
-        if start_positions is not None and end_positions is not None:
-            # If we are on multi-GPU, split add a dimension
-            boundry = question_input_ids.shape[1]
-            start_positions = torch.where(start_positions > 0, start_positions + boundry, start_positions)
-            end_positions = torch.where(end_positions > 0, end_positions + boundry, end_positions)
-            if len(start_positions.size()) > 1:
-                start_positions = start_positions.squeeze(-1)
-            if len(end_positions.size()) > 1:
-                end_positions = end_positions.squeeze(-1)
-            # sometimes the start/end positions are outside our model inputs, we ignore these terms
-            ignored_index = start_logits.size(1)
-            start_positions = start_positions.clamp(0, ignored_index)
-            end_positions = end_positions.clamp(0, ignored_index)
+            if self.config.problem_type == "regression":
+                loss_fct = MSELoss()
+                if self.num_labels == 1:
+                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                else:
+                    loss = loss_fct(logits, labels)
+            elif self.config.problem_type == "single_label_classification":
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
-            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
-            start_loss = loss_fct(start_logits, start_positions)
-            end_loss = loss_fct(end_logits, end_positions)
-            total_loss = (start_loss + end_loss) / 2
+                input_ids = torch.cat([question_input_ids, input_ids], dim=1)
+                attention_mask = torch.cat([question_attention_mask, attention_mask], dim=1)
+                teacher_results = self.teacher(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True
+                )
+                # teacher_logits = teacher_results['logits'].softmax(dim=1) / self.temperature
+                # sl_loss_fct = CrossEntropyLoss()
+                # teach_loss = sl_loss_fct(logits / self.temperature, teacher_logits)
+                teacher_hidden_states=teacher_results['hidden_states'][-1]
+                teach_loss_fct = nn.MSELoss()
+                teach_loss=teach_loss_fct(teacher_hidden_states,outputs['last_hidden_state'])
+                # teach_loss_fct = CosineEmbeddingLoss(reduction='mean')
+                # xx1 = torch.flatten(teacher_hidden_states, start_dim=1)
+                # xx2 = torch.flatten(outputs['last_hidden_state'], start_dim=1)
+                # yy = torch.ones(xx1.shape[0], dtype=torch.int, device=xx1.device)
+                # teach_loss = teach_loss_fct(xx1, xx2, yy)
+                loss = (1 - self.alpha) * loss + self.alpha * teach_loss
 
-            input_ids = torch.cat([question_input_ids, input_ids], dim=1)
-            attention_mask = torch.cat([question_attention_mask, attention_mask], dim=1)
-            teacher_results = self.teacher(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                start_positions=start_positions,
-                end_positions=end_positions,
-                output_hidden_states=True
-            )
-            teacher_start_logits = teacher_results['start_logits'].softmax(dim=1) / self.temperature
-            teacher_end_logits = teacher_results['end_logits'].softmax(dim=1) / self.temperature
-            sl_loss_fct = CrossEntropyLoss()
-            teach_loss = (sl_loss_fct(start_logits / self.temperature, teacher_start_logits) + sl_loss_fct(
-                end_logits / self.temperature, teacher_end_logits)) / 2
-            # teacher_hidden_states=teacher_results['hidden_states'][-1]
-            # teach_loss_fct = nn.MSELoss()
-            # teach_loss=teach_loss_fct(teacher_hidden_states,outputs['last_hidden_state'])
-            # teach_loss_fct = CosineEmbeddingLoss(reduction='mean')
-            # xx1 = torch.flatten(teacher_hidden_states, start_dim=1)
-            # xx2 = torch.flatten(outputs['last_hidden_state'], start_dim=1)
-            # yy = torch.ones(xx1.shape[0], dtype=torch.int, device=xx1.device)
-            # teach_loss = teach_loss_fct(xx1, xx2, yy)
-            total_loss = (1 - self.alpha) * total_loss + self.alpha * teach_loss
+            elif self.config.problem_type == "multi_label_classification":
+                loss_fct = BCEWithLogitsLoss()
+                loss = loss_fct(logits, labels)
 
         if not return_dict:
-            output = (start_logits, end_logits) + outputs[2:]
-            return ((total_loss,) + output) if total_loss is not None else output
+            output = (logits,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
 
-        return QuestionAnsweringModelOutput(
-            loss=total_loss,
-            start_logits=start_logits,
-            end_logits=end_logits,
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
@@ -708,7 +697,7 @@ def convert_ro_incr(model,config):
         revision='main',
         use_auth_token=False,
     )
-    model.teacher = RobertaForQuestionAnswering.from_pretrained(
+    model.teacher = RobertaForSequenceClassification.from_pretrained(
         config.teacher_model_path,
         from_tf=bool(".ckpt" in config.teacher_model_path),
         config=teacher_config,
@@ -718,5 +707,3 @@ def convert_ro_incr(model,config):
     )
     for param in model.teacher.parameters():
         param.requires_grad = False
-    #for param in model.roberta.encoder.parameters():
-        #param.requires_grad = False

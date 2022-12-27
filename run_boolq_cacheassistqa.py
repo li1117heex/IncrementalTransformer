@@ -44,8 +44,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 
-from incremental_trf3_teach2_deformer_assist_boolq import IncrementalRobertaForSequenceClassification
-from incremental_trf3_teach2_deformer_assist_boolq import convert_ro_incr
+from cacheassistqa_encoder_boolq import CacheAssistQAForSequenceClassification,convert_ro_incr
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.17.0.dev0")
@@ -351,7 +350,7 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    model = IncrementalRobertaForSequenceClassification.from_pretrained(
+    model = CacheAssistQAForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
