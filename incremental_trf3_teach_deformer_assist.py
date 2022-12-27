@@ -13,7 +13,7 @@ from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, CosineEmbeddingLoss
 from transformers import AutoConfig
 
-from incremental_attn_p2q import IncrementalRobertaSelfAttentionCross
+from cacheassist_attn import CacheAssistAttention
 import copy
 
 class IncrementalRobertaLayer(RobertaLayer):
@@ -225,7 +225,7 @@ class IncrementalRobertaModel(RobertaModel):
         self.encoder2assist = IncrementalRobertaEncoder(config2assist)
         self.encoder3 = RobertaEncoder(config3)
         for i, layer in enumerate(self.encoder2assist.layer):
-            layer.attention.self = IncrementalRobertaSelfAttentionCross(config)
+            layer.attention.self = CacheAssistQAAttention(config)
 
         # Initialize weights and apply final processing
         self.post_init()

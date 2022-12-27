@@ -5,7 +5,7 @@ from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 import math
 
-class IncrementalRobertaSelfAttentionCross(nn.Module):
+class CacheAssistAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
@@ -69,60 +69,20 @@ class IncrementalRobertaSelfAttentionCross(nn.Module):
         #     key_layer = torch.cat([past_key_value[0], key_layer], dim=2)
         #     value_layer = torch.cat([past_key_value[1], value_layer], dim=2)
         # else:
-        boundry=hidden_states.shape[1]
-        # encoder3_input = (1 - sequence_mask)[:, :, None] * encoder_outputs[0]
-        # encoder3_input[:, :boundry] = encoder3_input[:, :boundry] + sequence_mask[:, :boundry, None] * encoder2_output[0]
-        # print(encoder_hidden_states,encoder_attention_mask)
-        #all_hidden_states=torch.cat(((1 - encoder_attention_mask)[:, :, None] * encoder_hidden_states[:, :boundry]+encoder_attention_mask[:,:,None]*hidden_states,encoder_hidden_states[:, boundry:]),1)
         all_hidden_states = torch.cat([hidden_states,encoder_hidden_states],dim=1)
         key_layer = self.transpose_for_scores(self.key(all_hidden_states))
         value_layer = self.transpose_for_scores(self.value(all_hidden_states))
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
 
-        if self.is_decoder:
-            # if cross_attention save Tuple(torch.Tensor, torch.Tensor) of all cross attention key/value_states.
-            # Further calls to cross_attention layer can then reuse all cross-attention
-            # key/value_states (first "if" case)
-            # if uni-directional self-attention (decoder) save Tuple(torch.Tensor, torch.Tensor) of
-            # all previous decoder key/value_states. Further calls to uni-directional self-attention
-            # can concat previous decoder key/value_states to current projected key/value_states (third "elif" case)
-            # if encoder bi-directional self-attention `past_key_value` is always `None`
-            past_key_value = (key_layer, value_layer)
-
-        # Take the dot product between "query" and "key" to get the raw attention scores.
-        # attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-
-        # boundry:max length of question(text1)
-        # boundry=(attention_mask.diagonal(dim1=2,dim2=3)==0).type(torch.int).sum(-1).max()
-
         # compute attn
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-        # attention_scores2 = torch.matmul(query_layer[:, :, boundry:], key_layer[:,:,:boundry].transpose(-1, -2))
-        # attention_scores = torch.zeros(query_layer.shape[:3]+(query_layer.shape[-1]),dtype=query_layer.dtype,device=query_layer.device)
-        # attention_scores[:,:,:boundry]=attention_scores1
-        # attention_scores[:,:,boundry:,:boundry]=attention_scores2
-
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        # attention_scores2 = attention_scores2 / math.sqrt(self.attention_head_size)
-        # attention_mask1=attention_mask[:,:,:boundry]
-        # attention_mask2=attention_mask[:, :, boundry:,:boundry]
         attention_scores=attention_scores+attention_mask
-        # attention_scores2 = attention_scores2 + attention_mask2
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-        # attention_probs2 = nn.functional.softmax(attention_scores2, dim=-1)
-
-        # attention_probs=torch.zeros(list(query_layer.shape[:3])+[query_layer.shape[-2]],dtype=query_layer.dtype,device=query_layer.device)
-        # attention_probs[:, :, :boundry] = attention_probs1
-        # attention_probs[:,:,boundry:,:boundry]=attention_probs2
-        # attention_probs = self.dropout(attention_probs)
-        # context_layer = torch.matmul(attention_probs, value_layer)
 
         attention_probs = self.dropout(attention_probs)
-        # attention_probs2 = self.dropout(attention_probs2)
         context_layer = torch.matmul(attention_probs, value_layer)
-        # context_layer2 = torch.matmul(attention_probs2, value_layer[:, :, :boundry])
-        # context_layer = torch.cat([context_layer1,context_layer2],dim=2)
 
         # if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
         #     seq_length = hidden_states.size()[1]
