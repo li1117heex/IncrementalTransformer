@@ -86,13 +86,13 @@ class ModelArguments:
             "with private models)."
         },
     )
-    encoder2_layers: int = field(
+    decomposed_layers: int = field(
         default=12
     )
     assist_layers: int = field(
         default=4
     )
-    encoder3_layers: int = field(
+    full_layers: int = field(
         default=8
     )
     teacher_model_path: str = field(
@@ -142,6 +142,13 @@ class DataTrainingArguments:
         metadata={
             "help": "The maximum total input sequence length after tokenization. Sequences longer "
             "than this will be truncated, sequences shorter will be padded."
+        },
+    )
+    max_first_length: int = field(
+        default=50,
+        metadata={
+            "help": "The maximum total input sequence length after tokenization. Sequences longer "
+                    "than this will be truncated, sequences shorter will be padded."
         },
     )
     pad_to_max_length: bool = field(
@@ -319,9 +326,9 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    config.encoder2_layers = model_args.encoder2_layers
+    config.decomposed_layers = model_args.decomposed_layers
     config.assist_layers = model_args.assist_layers
-    config.encoder3_layers = model_args.encoder3_layers
+    config.full_layers = model_args.full_layers
     config.teacher_model_path = model_args.teacher_model_path
     config.alpha = model_args.alpha
     config.temperature = model_args.temperature
@@ -385,7 +392,7 @@ def main():
         tokenized_questions = tokenizer(
             examples[question_column_name],
             truncation=True,
-            max_length=50,
+            max_length=data_args.max_first_length,
             # return_overflowing_tokens=True,
             return_offsets_mapping=True,
             padding='max_length'
@@ -504,7 +511,7 @@ def main():
         tokenized_questions = tokenizer(
             examples[question_column_name],
             truncation=True,
-            max_length=50,
+            max_length=data_args.max_first_length,
             # return_overflowing_tokens=True,
             return_offsets_mapping=True,
             padding='max_length'
@@ -553,7 +560,7 @@ def main():
                 (o if sequence_ids[k] == context_index else None)
                 for k, o in enumerate(tokenized_examples["offset_mapping"][i])
             ]
-            tokenized_examples["offset_mapping"][i]=[None]*50+tokenized_examples["offset_mapping"][i]
+            tokenized_examples["offset_mapping"][i]=[None]*data_args.max_first_length+tokenized_examples["offset_mapping"][i]
 
 
         return tokenized_examples

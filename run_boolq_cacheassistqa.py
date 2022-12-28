@@ -100,13 +100,13 @@ class ModelArguments:
             "with private models)."
         },
     )
-    encoder2_layers: int = field(
+    decomposed_layers: int = field(
         default=12
     )
     assist_layers: int = field(
         default=4
     )
-    encoder3_layers: int = field(
+    full_layers: int = field(
         default=8
     )
     teacher_model_path: str = field(
@@ -337,9 +337,9 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    config.encoder2_layers = model_args.encoder2_layers
+    config.decomposed_layers = model_args.decomposed_layers
     config.assist_layers = model_args.assist_layers
-    config.encoder3_layers = model_args.encoder3_layers
+    config.full_layers = model_args.full_layers
     config.teacher_model_path = model_args.teacher_model_path
     config.alpha = model_args.alpha
     config.temperature = model_args.temperature
