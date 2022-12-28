@@ -4,7 +4,7 @@ This repo contains codes of Cache-Assist QA.
 
 ## Setup
 
-
+Run `python prepare_datasets.py` to download and splits datasets including SQuADv1.1, SQuADv2 , RACE and BoolQ.
 
 ## How to use
 
