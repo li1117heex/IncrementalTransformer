@@ -1,17 +1,19 @@
-# Cache-Assist QA: Faster Online QA by Caching Passage Representations to Assist Question Understanding
+**Incremental Transformer: Efficient Encoder for Incremented Text Over**
 
-This repo contains codes of Cache-Assist QA.
+**MRC and Conversation Tasks**
+
+This repo contains codes of Incremental Transformer.
 
 ## Setup
 
-Run `python prepare_datasets.py` to download and splits datasets including SQuADv1.1, SQuADv2 , RACE and BoolQ.
+Run `python prepare_datasets.py` to download and splits datasets including SQuADv1.1, SQuADv2 , RACE, BoolQ and QuAC.
 
 ## How to use
 
-This is a example for finetuning Cache-Assist QA on SQuADV1.1 dataset with $k=m=20$. `teacher_model_path` designates model in `ro_squad_large` as teacher model for auxiliary loss and `--alpha` means the ratio of auxiliary loss.  Teacher model is the finetuned RoBERTa model of the same datasets, can be obtained by scripts like `run_qa.py`. For SQuADv2 dataset, `--version_2_with_negative `should be set for unanswerable questions. For RACE and BoolQ datasets, use `run_race_cacheassistqa.py` and `run_boolq_cacheassistqa.py` respectively. 
+This is a example for finetuning Incremental Transformer on SQuADV1.1 dataset with $k=m=20$. `teacher_model_path` designates model in `ro_squad_large` as teacher model for auxiliary loss and `--alpha` means the ratio of auxiliary loss.  Teacher model is the finetuned RoBERTa model of the same datasets, can be obtained by scripts like `run_qa.py`. For SQuADv2 dataset, `--version_2_with_negative `should be set for unanswerable questions. For RACE and BoolQ datasets, use `run_race_incremental.py` and `run_boolq_incremental.py` respectively. For QuAC dataset, use `run_quac_incremental.py`.
 
 ```shell
-python run_qa_cacheassistqa.py \
+python run_qa_incremental.py \
 	--model_name_or_path roberta-large \
 	--dataset_name squadsplit \
 	--do_train \
@@ -22,7 +24,7 @@ python run_qa_cacheassistqa.py \
 	--num_train_epochs 2 \
 	--max_seq_length 384 \
 	--doc_stride 128 \
-	--output_dir cacheassistqa_squad \
+	--output_dir incremental_squad \
 	--eval_steps 500 \
 	--save_steps 1000 \
 	--evaluation_strategy steps \
