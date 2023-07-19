@@ -1,4 +1,4 @@
-**Incremental Transformer: Efficient Encoder for Incremented Text Over**
+# **Incremental Transformer: Efficient Encoder for Incremented Text Over**
 
 **MRC and Conversation Tasks**
 
